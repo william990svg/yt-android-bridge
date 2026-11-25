@@ -37,7 +37,10 @@ PLAYER_CLIENTS = ("android", "ios")
 
 
 def get_direct_url(video_url):
-    """Return a direct mp4 URL for the video, or None if yt-dlp can't get one."""
+    """Return (direct_url, diagnostics). diagnostics holds the last yt-dlp
+    stderr line per client attempt (sanitized, no secrets) so a failure can
+    be diagnosed from the API response without server logs."""
+    diagnostics = []
     for client in PLAYER_CLIENTS:
         try:
             proc = subprocess.run(
@@ -57,13 +60,17 @@ def get_direct_url(video_url):
                 text=True,
                 timeout=60,
             )
-        except Exception:
+        except Exception as exc:
+            diagnostics.append("%s: %s" % (client, type(exc).__name__))
             continue
         lines = (proc.stdout or "").strip().splitlines()
         url = lines[0].strip() if lines else ""
         if url.startswith("http"):
-            return url
-    return None
+            return url, diagnostics
+        err_lines = (proc.stderr or "").strip().splitlines()
+        last = err_lines[-1].strip() if err_lines else "no stderr"
+        diagnostics.append("%s: %s" % (client, last[:160]))
+    return None, diagnostics
 
 
 @app.route("/", methods=["GET"])
@@ -82,10 +89,14 @@ def download():
             ),
             400,
         )
-    direct = get_direct_url(url)
+    direct, diagnostics = get_direct_url(url)
     if not direct:
         return jsonify(
-            {"status": "error", "error": {"code": "error.api.youtube.unavailable"}}
+            {
+                "status": "error",
+                "error": {"code": "error.api.youtube.unavailable"},
+                "detail": "; ".join(diagnostics)[:300],
+            }
         )
     proxy = request.host_url.rstrip("/") + "/file?u=" + urllib.parse.quote(
         direct, safe=""
