@@ -31,6 +31,12 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 app = Flask(__name__)
 
 YTDLP = os.environ.get("YTDLP", "/usr/local/bin/yt-dlp")
+# Optional YouTube session cookies (Render Secret File, added by the user
+# himself in the dashboard — never shared with the agent). When present,
+# yt-dlp sends them with every request, which is what YouTube demands
+# from datacenter IPs ("Sign in to confirm you're not a bot").
+# Env override COOKIES_FILE, default /etc/secrets/cookies.txt.
+COOKIES_FILE = os.environ.get("COOKIES_FILE", "/etc/secrets/cookies.txt")
 # Android first (worked from a clean IP, blocked on Render's Oregon IPs),
 # TV client next (uses the TV HTML5 API, sometimes bypasses the sign-in
 # wall where the mobile clients don't), iOS last.
@@ -43,20 +49,23 @@ def get_direct_url(video_url):
     be diagnosed from the API response without server logs."""
     diagnostics = []
     for client in PLAYER_CLIENTS:
+        cmd = [
+            YTDLP,
+            "--no-playlist",
+            "-q",
+            "--no-warnings",
+            "--get-url",
+            "-f",
+            "18/best",
+            "--extractor-args",
+            "youtube:player_client=%s" % client,
+            video_url,
+        ]
+        if os.path.exists(COOKIES_FILE):
+            cmd[1:1] = ["--cookies", COOKIES_FILE]
         try:
             proc = subprocess.run(
-                [
-                    YTDLP,
-                    "--no-playlist",
-                    "-q",
-                    "--no-warnings",
-                    "--get-url",
-                    "-f",
-                    "18/best",
-                    "--extractor-args",
-                    "youtube:player_client=%s" % client,
-                    video_url,
-                ],
+                cmd,
                 capture_output=True,
                 text=True,
                 timeout=20,
