@@ -22,6 +22,7 @@ googlevideo.com URLs, so the service can't be used as a general proxy.
 """
 
 import os
+import shutil
 import subprocess
 import urllib.parse
 
@@ -37,6 +38,28 @@ YTDLP = os.environ.get("YTDLP", "/usr/local/bin/yt-dlp")
 # from datacenter IPs ("Sign in to confirm you're not a bot").
 # Env override COOKIES_FILE, default /etc/secrets/cookies.txt.
 COOKIES_FILE = os.environ.get("COOKIES_FILE", "/etc/secrets/cookies.txt")
+# Render mounts Secret Files under /etc/secrets READ-ONLY, but yt-dlp
+# SAVES the cookie jar back to the file on exit (verified locally: the
+# file's mtime/content change after every run). Pointing --cookies
+# straight at the secret file therefore fails on every request with
+# "OSError: [Errno 30] Read-only file system". Copy it to /tmp
+# (writable) first and hand yt-dlp the copy instead. The copy is
+# refreshed on every request, so a rotated secret is picked up.
+WRITABLE_COOKIES = "/tmp/cookies.txt"
+
+
+def get_cookies_path():
+    """Copy the secret cookies file to a writable path and return it,
+    or None when no cookies file is present."""
+    if not os.path.exists(COOKIES_FILE):
+        return None
+    try:
+        shutil.copyfile(COOKIES_FILE, WRITABLE_COOKIES)
+        return WRITABLE_COOKIES
+    except OSError:
+        return None
+
+
 # Android first (worked from a clean IP, blocked on Render's Oregon IPs),
 # TV client next (uses the TV HTML5 API, sometimes bypasses the sign-in
 # wall where the mobile clients don't), iOS last.
@@ -61,8 +84,9 @@ def get_direct_url(video_url):
             "youtube:player_client=%s" % client,
             video_url,
         ]
-        if os.path.exists(COOKIES_FILE):
-            cmd[1:1] = ["--cookies", COOKIES_FILE]
+        cookies_path = get_cookies_path()
+        if cookies_path:
+            cmd[1:1] = ["--cookies", cookies_path]
         try:
             proc = subprocess.run(
                 cmd,
