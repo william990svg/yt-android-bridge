@@ -31,9 +31,10 @@ from flask import Flask, Response, jsonify, request, stream_with_context
 app = Flask(__name__)
 
 YTDLP = os.environ.get("YTDLP", "/usr/local/bin/yt-dlp")
-# Android first (verified working Nov 2026 for login-walled videos),
-# iOS as a fallback; the web client is blocked on datacenter IPs.
-PLAYER_CLIENTS = ("android", "ios")
+# Android first (worked from a clean IP, blocked on Render's Oregon IPs),
+# TV client next (uses the TV HTML5 API, sometimes bypasses the sign-in
+# wall where the mobile clients don't), iOS last.
+PLAYER_CLIENTS = ("android", "tv", "ios")
 
 
 def get_direct_url(video_url):
@@ -58,7 +59,7 @@ def get_direct_url(video_url):
                 ],
                 capture_output=True,
                 text=True,
-                timeout=60,
+                timeout=20,
             )
         except Exception as exc:
             diagnostics.append("%s: %s" % (client, type(exc).__name__))
@@ -95,7 +96,7 @@ def download():
             {
                 "status": "error",
                 "error": {"code": "error.api.youtube.unavailable"},
-                "detail": "; ".join(diagnostics)[:300],
+                "detail": "; ".join(diagnostics)[:500],
             }
         )
     proxy = request.host_url.rstrip("/") + "/file?u=" + urllib.parse.quote(
